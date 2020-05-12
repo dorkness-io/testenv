@@ -2,71 +2,11 @@
 #
 # Script to automate and simplify deployment of Atlassian test instances.
 
-CONFIGFILE="$HOME/.testenv" 
+DEPLOYMENTS_DIR="$HOME/deployments";
+DOWNLOADS_DIR="$HOME/tarfiles";
 
-firstrun()
-{
-  CONFIGFILE="$HOME/.testenv"
-  echo "--------------------"
-  echo "Hello!"
-  echo "This appears to be your first time running the script"
-  echo "Let's set a few variables for future use."
-  echo "--------------------"
-  # User input for variables with defaults
-  echo "Define the directory where you'll be storing your deployments."
-  read -p "[$HOME/deployments]: " DEPLOYMENTS_DIR
-  DEPLOYMENTS_DIR=${DEPLOYMENTS_DIR:-$HOME/deployments}
-  echo "...will use ${DEPLOYMENTS_DIR}\n\n"
-  echo "Define the directory where you'll be storing product downloads."
-  read -p "[$DEPLOYMENTS_DIR/downloads]" DOWNLOADS_DIR
-  DOWNLOADS_DIR=${DOWNLOADS_DIR:-$DEPLOYMENTS_DIR/downloads}
-  echo "...will use ${DOWNLOADS_DIR}"
-  touch $CONFIGFILE
-  echo "DEPLOYMENTS_DIR=${DEPLOYMENTS_DIR}" >> $CONFIGFILE
-  echo "DOWNLOADS_DIR=${DOWNLOADS_DIR}" >> $CONFIGFILE 
-  echo ""
-  echo "Variable configuration complete! Please re-run the script."
-  echo ""
-  exit 0
-}
+prep_directory(){
 
-deploy_product() {
-  if [[ "$PRODUCT" == "jira-software" ]]
-    then
-      DOWNLOAD_URL="https://www.atlassian.com/software/jira/downloads/binary/atlassian-jira-software-${VERSION}.tar.gz"
-    elif [[ "$PRODUCT" == "jira-core" ]]
-      then
-        DOWNLOAD_URL="https://www.atlassian.com/software/jira/downloads/binary/atlassian-jira-core-${VERSION}.tar.gz"
-    elif [[ "$PRODUCT" == "jira-servicedesk" ]]
-      then
-        DOWNLOAD_URL="https://www.atlassian.com/software/jira/downloads/binary/atlassian-servicedesk-${VERSION}.tar.gz"
-    else 
-      echo "Unrecognized product. Bailing!"
-      exit 1
-    fi
-
-  DOWNLOAD_FILE="${DOWNLOAD_URL##*/}"
-
-  if [[ ! -f "${DOWNLOADS_DIR}/${DOWNLOAD_FILE}" ]]
-    then
-      echo "\nDownloading ${DOWNLOAD_URL}...\n"
-      wget -P $DOWNLOADS_DIR $DOWNLOAD_URL
-      echo "\nDownloaded ${DOWNLOAD_FILE}.\n"
-    else
-      echo "Already downloaded, moving on."
-  fi
-  
-  echo "Installing ${NAME} to ${DEPLOYMENTS_DIR}..."
-
-#  mkdir -p $DEPLOYMENTS_DIR/$NAME/install
-#  mkdir -p $DEPLOYMENTS_DIR/$NAME/home
-}
-
-if [[ ! -f "${HOME}/.testenv" ]]
-  then firstrun
-fi
-
-source $CONFIGFILE
 if [[ ! -d "${DEPLOYMENTS_DIR}" ]]
   then
     mkdir $DEPLOYMENTS_DIR
@@ -78,6 +18,60 @@ if [[ ! -d "${DOWNLOADS_DIR}" ]]
     mkdir $DOWNLOADS_DIR
     echo "${DOWNLOADS_DIR} directory did not exist! I created it."
 fi
+}
+
+
+deploy_product() {
+
+if [[ -z "${PRODUCT}" || -z "${VERSION}" ]]; then
+  echo "\nNeed product and version : Run it as ./script.sh --product <product name> --version <version>\n"
+  exit 1
+fi  
+    if [[ "$PRODUCT" == "jira-software" ]]
+      then
+        DOWNLOAD_URL="https://www.atlassian.com/software/jira/downloads/binary/atlassian-jira-software-${VERSION}.tar.gz"
+    elif [[ "$PRODUCT" == "jira-core" ]]
+      then
+        DOWNLOAD_URL="https://www.atlassian.com/software/jira/downloads/binary/atlassian-jira-core-${VERSION}.tar.gz"
+    elif [[ "$PRODUCT" == "jira-servicedesk" ]]
+      then
+        DOWNLOAD_URL="https://www.atlassian.com/software/jira/downloads/binary/atlassian-servicedesk-${VERSION}.tar.gz"
+    else 
+      echo "Unrecognized product. Bailing!"
+      exit 1
+    fi
+
+  #DOWNLOAD_FILE="${DOWNLOAD_URL##*/}"
+  
+  #Get the downloaded file name from the download url
+  DOWNLOAD_FILE=$(echo "${DOWNLOAD_URL}"  | sed 's/https\:\/\/www\.atlassian\.com\/software\/jira\/downloads\/binary\///g')
+
+  if [[ ! -f "${DOWNLOADS_DIR}/${DOWNLOAD_FILE}" ]]
+    then
+      echo "\nDownloading ${DOWNLOAD_URL}...\n"
+      wget_output=$(wget -P $DOWNLOADS_DIR $DOWNLOAD_URL)
+      if [[ $? -ne 0 ]]; then
+        echo "Error downloading file"
+        exit
+      else
+        echo "\nDownloaded ${DOWNLOAD_FILE}.\n"
+      fi
+  fi
+  echo "Installing ${PRODUCT} of version ${VERSION} to ${DEPLOYMENTS_DIR}..."
+  # Move the untarred contents to a folder created and named as the version
+  mkdir ${DEPLOYMENTS_DIR}/${VERSION} && tar -xzf ${DOWNLOADS_DIR}/atlassian-${PRODUCT}-${VERSION}.tar.gz -C ${DEPLOYMENTS_DIR}/${VERSION} --strip-components 1
+  mkdir ${DEPLOYMENTS_DIR}/${VERSION}/jira-home
+  JIRA_INSTALL_DIR=${DEPLOYMENTS_DIR}/${VERSION}
+
+  # Update jira.application properties with jira home
+  cat /dev/null > ${DEPLOYMENTS_DIR}/${VERSION}/atlassian-jira/WEB-INF/classes/jira-application.properties
+  JIRA_HOME=${DEPLOYMENTS_DIR}/${VERSION}/jira-home; echo "jira.home=${JIRA_HOME}" >> ${DEPLOYMENTS_DIR}/${VERSION}/atlassian-jira/WEB-INF/classes/jira-application.properties
+
+  # start Jira
+  ${JIRA_INSTALL_DIR}/bin/start-jira.sh
+
+}
+
 
 while [[ $# > 1 ]]
 do
@@ -104,4 +98,6 @@ esac
 shift
 done
 
+prep_directory
 deploy_product
+
